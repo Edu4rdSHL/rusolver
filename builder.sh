@@ -70,12 +70,12 @@ if command -v git >/dev/null; then
   git push
 fi
 
-echo "Uploading crate to crates.io..."
-if cargo publish --no-verify > /dev/null; then
-  echo "Crate uploaded."
-else
-  echo "An error has occurred while uploading the crate to crates.io."
-  exit
-fi
+#echo "Uploading crate to crates.io..."
+#if cargo publish --no-verify > /dev/null; then
+#  echo "Crate uploaded."
+#else
+#  echo "An error has occurred while uploading the crate to crates.io."
+#  exit
+#fi
 
 echo "All builds have passed!"
