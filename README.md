@@ -28,6 +28,18 @@ Type "help", "copyright", "credits" or "license" for more information.
 # 1226 hosts were resolved per second in average
 ```
 
+# Installation
+
+## Using precompiled binaries.
+
+Download the asset from the [releases page](https://github.com/Edu4rdSHL/rusolver/releases/latest) according to your platform.
+
+## Using the source code.
+
+1. You need to have the lastest stable [Rust](https://www.rust-lang.org/) version insalled in your system.
+2. Clone the repo or download the source code, then run `cargo build --release`.
+3. Execute the tool from `./target/release/rusolver` or add it to your system PATH to use from anywhere.
+
 # Usage
 * By default we only show the resolved hosts
 ```
