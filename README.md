@@ -1,5 +1,5 @@
 # Rusolver
-Fast DNS resolver written in Rust. Works on Linux, Windows, macOS, Android and possibly in your oven.
+Fast DNS resolver written in Rust. Works on Linux, Windows, macOS, Android, Aarch64, ARM and possibly in your oven.
 
 # Goal
 Offer the community an efficient host resolution tool.
