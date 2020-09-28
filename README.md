@@ -40,6 +40,8 @@ Download the asset from the [releases page](https://github.com/Edu4rdSHL/rusolve
 2. Clone the repo or download the source code, then run `cargo build --release`.
 3. Execute the tool from `./target/release/rusolver` or add it to your system PATH to use from anywhere.
 
+Optionally you can just use `cargo install rusolver`
+
 # Usage
 * By default we only show the resolved hosts
 ```
