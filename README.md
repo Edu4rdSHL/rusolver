@@ -8,6 +8,9 @@ Offer the community an efficient host resolution tool.
 Rusolver is **very** resource friendly, you can use up to 1000 threads in an single core machine and this will work without any problem, the bottleneck for this tool is your network speed. By default, Rusolver is able to perform resolution for ~1532 hosts per second in good network conditions (tested in an AWS machine).
 
 ## Demo
+
+The files used in the demo are [here](files/). `hosts.txt` is the list of hosts to perform resolution and the `resolved.txt` are the ones that Rusolver found as active.
+
 [![asciicast](https://asciinema.org/a/362323.svg)](https://asciinema.org/a/362323)
 
 # Installation
