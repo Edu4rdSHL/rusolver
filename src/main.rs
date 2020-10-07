@@ -51,66 +51,69 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut options = ResolverOpts::default();
     options.timeout = std::time::Duration::from_secs(timeout);
 
+    // Create resolvers
+    let dns_ips = vec![
+        // Cloudflare
+        "1.1.1.1",
+        "1.0.0.1",
+        // Google
+        "8.8.8.8",
+        "8.8.4.4",
+        // Quad9
+        "9.9.9.9",
+        "149.112.112.112",
+        // OpenDNS
+        "208.67.222.222",
+        "208.67.220.220",
+        // Verisign
+        "64.6.64.6",
+        "64.6.65.6",
+        // UncensoredDNS
+        "91.239.100.100",
+        "89.233.43.71",
+        // dns.watch
+        "84.200.69.80",
+        "84.200.70.40",
+    ];
+
+    let mut resolvers = Vec::new();
+    for ip in dns_ips {
+        resolvers.push(
+            TokioAsyncResolver::tokio(
+                ResolverConfig::from_parts(
+                    None,
+                    vec![],
+                    NameServerConfigGroup::from_ips_clear(&[IpAddr::V4(ip.parse().unwrap())], 53),
+                ),
+                options,
+            )
+            .await
+            .unwrap(),
+        )
+    }
+
     // Read stdin
     let mut buffer = String::new();
     let mut stdin = io::stdin();
     stdin.read_to_string(&mut buffer).await?;
     let hosts: Vec<String> = buffer.lines().map(str::to_owned).collect();
 
-    futures::stream::iter(hosts.into_iter().map(|host| async move {
-        let dns_ips = vec![
-            // Cloudflare
-            "1.1.1.1",
-            "1.0.0.1",
-            // Google
-            "8.8.8.8",
-            "8.8.4.4",
-            // Quad9
-            "9.9.9.9",
-            "149.112.112.112",
-            // OpenDNS
-            "208.67.222.222",
-            "208.67.220.220",
-            // Verisign
-            "64.6.64.6",
-            "64.6.65.6",
-            // UncensoredDNS
-            "91.239.100.100",
-            "89.233.43.71",
-            // dns.watch
-            "84.200.69.80",
-            "84.200.70.40",
-        ];
-        if let Ok(ip) = TokioAsyncResolver::tokio(
-            ResolverConfig::from_parts(
-                None,
-                vec![],
-                NameServerConfigGroup::from_ips_clear(
-                    &[IpAddr::V4(
-                        dns_ips[rand::thread_rng().gen_range(0, dns_ips.len())]
-                            .parse()
-                            .unwrap(),
-                    )],
-                    53,
-                ),
-            ),
-            options,
-        )
-        .await
-        .unwrap()
-        .ipv4_lookup(host.clone() + ".")
-        .await
-        {
-            if show_ip_adress {
-                println!(
-                    "{};{:?}",
-                    host,
-                    ip.into_iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<String>>()
-                )
-            } else {
-                println!("{}", host)
+    futures::stream::iter(hosts.into_iter().map(|host| {
+        let resolver_fut =
+            resolvers[rand::thread_rng().gen_range(0, resolvers.len())].ipv4_lookup(host.clone());
+        async move {
+            if let Ok(ip) = resolver_fut.await {
+                if show_ip_adress {
+                    println!(
+                        "{};{:?}",
+                        host,
+                        ip.into_iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<String>>()
+                    )
+                } else {
+                    println!("{}", host)
+                }
             }
         }
     }))
