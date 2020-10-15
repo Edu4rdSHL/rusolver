@@ -27,6 +27,20 @@ Download the asset from the [releases page](https://github.com/Edu4rdSHL/rusolve
 
 Optionally you can just use `cargo install rusolver`
 
+## Using the AUR packages. (Arch Linux)
+
+`rusolver` can be installed from available [AUR packages](https://aur.archlinux.org/packages/?O=0&SeB=b&K=rusolver&outdated=&SB=n&SO=a&PP=50&do_Search=Go) using an [AUR helper](https://wiki.archlinux.org/index.php/AUR_helpers). For example,
+
+```
+yay -S rusolver
+```
+
+If you prefer, you can clone the [AUR packages](https://aur.archlinux.org/packages/?O=0&SeB=b&K=rusolver&outdated=&SB=n&SO=a&PP=50&do_Search=Go) and then compile them with [makepkg](https://wiki.archlinux.org/index.php/Makepkg). For example,
+
+```
+git clone https://aur.archlinux.org/rusolver.git && cd rusolver && makepkg -si
+```
+
 # Usage
 * By default we only show the resolved hosts
 ```
