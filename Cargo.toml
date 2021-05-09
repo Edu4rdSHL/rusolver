@@ -12,8 +12,8 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "0.2.22", features = ["full"] }
-futures = "0.3.5"
-trust-dns-resolver = "0.19.5"
+tokio = { version = "1.5.0", features = ["full"] }
+futures = "0.3.14"
+trust-dns-resolver = "0.20.2"
 clap = "2.33.3"
-rand = "0.7.3"
+rand = "0.8.3"

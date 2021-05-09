@@ -1,7 +1,9 @@
+use rand::prelude::SliceRandom;
+
 use {
     clap::{value_t, App, Arg},
     futures::stream::StreamExt,
-    rand::Rng,
+    rand::thread_rng as rng,
     std::net::IpAddr,
     tokio::{
         self,
@@ -44,12 +46,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Assign values or use defaults
     let show_ip_adress = matches.is_present("ip");
-    let threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|_| 500);
+    let threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|_| 100);
     let timeout = value_t!(matches.value_of("timeout"), u64).unwrap_or_else(|_| 1);
 
     // Resolver opts
-    let mut options = ResolverOpts::default();
-    options.timeout = std::time::Duration::from_secs(timeout);
+    let options = ResolverOpts {
+        timeout: std::time::Duration::from_secs(timeout),
+        ..Default::default()
+    };
 
     // Create resolvers
     let dns_ips = vec![
@@ -83,11 +87,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ResolverConfig::from_parts(
                     None,
                     vec![],
-                    NameServerConfigGroup::from_ips_clear(&[IpAddr::V4(ip.parse().unwrap())], 53),
+                    NameServerConfigGroup::from_ips_clear(
+                        &[IpAddr::V4(ip.parse().unwrap())],
+                        53,
+                        false,
+                    ),
                 ),
                 options,
             )
-            .await
             .unwrap(),
         )
     }
@@ -99,8 +106,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hosts: Vec<String> = buffer.lines().map(str::to_owned).collect();
 
     futures::stream::iter(hosts.into_iter().map(|host| {
-        let resolver_fut =
-            resolvers[rand::thread_rng().gen_range(0, resolvers.len())].ipv4_lookup(host.clone());
+        let resolver_fut = resolvers
+            .choose(&mut rng())
+            .expect("failed to retrieve DNS resolver")
+            .ipv4_lookup(host.clone());
         async move {
             if let Ok(ip) = resolver_fut.await {
                 if show_ip_adress {
