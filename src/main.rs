@@ -28,6 +28,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("threads")
                 .takes_value(true)
                 .help("Number of threads. Default: 100"),
+        ).arg(
+            Arg::with_name("domain")
+                .short("d")
+                .long("domain")
+                .takes_value(true)
+                .help("Target domain. When it's specified, a wordlist can be used from stdin for bruteforcing."),
         )
         .arg(
             Arg::with_name("resolvers")
@@ -101,7 +107,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = String::new();
     let mut stdin = io::stdin();
     stdin.read_to_string(&mut buffer).await?;
-    let hosts: Vec<String> = buffer.lines().map(str::to_owned).collect();
+
+    let hosts: Vec<String> = if matches.is_present("domain") {
+        let domain = value_t!(matches, "domain", String).unwrap();
+        buffer
+            .lines()
+            .map(|word| format!("{}.{}", word, domain))
+            .collect()
+    } else {
+        buffer.lines().map(str::to_owned).collect()
+    };
 
     futures::stream::iter(hosts.into_iter().map(|host| {
         let resolver_fut = resolvers
