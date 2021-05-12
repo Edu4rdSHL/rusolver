@@ -1,8 +1,11 @@
 use {
     clap::{value_t, App, Arg},
-    futures::stream::StreamExt,
-    rand::{prelude::SliceRandom, thread_rng as rng},
-    std::{collections::HashSet, net::IpAddr},
+    futures::stream::{self, StreamExt},
+    rand::{distributions::Alphanumeric, prelude::SliceRandom, thread_rng as rng, Rng},
+    std::{
+        collections::HashSet,
+        net::{IpAddr, Ipv4Addr},
+    },
     tokio::{
         self,
         fs::File,
@@ -55,12 +58,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .takes_value(false)
                 .help("Show the discovered IP addresses. Default: false"),
         )
+        .arg(
+            Arg::with_name("quiet")
+                .short("q")
+                .long("quiet")
+                .takes_value(false)
+                .help("Enables quiet mode."),
+        )
         .get_matches();
 
     // Assign values or use defaults
     let show_ip_adress = matches.is_present("ip");
     let threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|_| 100);
     let timeout = value_t!(matches.value_of("timeout"), u64).unwrap_or_else(|_| 1);
+    let quiet_flag = matches.is_present("quiet");
 
     // Resolver opts
     let options = ResolverOpts {
@@ -102,6 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let resolvers = return_tokio_dns(dns_ips, options).await;
+    let mut wildcard_ips = HashSet::new();
 
     // Read stdin
     let mut buffer = String::new();
@@ -110,6 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let hosts: Vec<String> = if matches.is_present("domain") {
         let domain = value_t!(matches, "domain", String).unwrap();
+        wildcard_ips = detect_wildcards(&domain, &resolvers, quiet_flag).await;
         buffer
             .lines()
             .map(|word| format!("{}.{}", word, domain))
@@ -123,17 +136,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .choose(&mut rng())
             .expect("failed to retrieve DNS resolver")
             .ipv4_lookup(host.clone());
+        let wildcard_ips = wildcard_ips.clone();
         async move {
             if let Ok(ip) = resolver_fut.await {
-                if show_ip_adress {
-                    println!(
-                        "{};{:?}",
-                        host,
-                        ip.into_iter()
-                            .map(|x| x.to_string())
-                            .collect::<Vec<String>>()
-                    )
-                } else {
+                let ips = ip
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect::<HashSet<String>>();
+                if show_ip_adress && !ips.iter().all(|ip| wildcard_ips.contains(ip)) {
+                    println!("{};{:?}", host, ips)
+                } else if !ips.iter().all(|ip| wildcard_ips.contains(ip)) {
                     println!("{}", host)
                 }
             }
@@ -196,4 +208,61 @@ async fn return_tokio_dns(
         )
     }
     resolvers
+}
+
+async fn detect_wildcards(
+    target: &str,
+    resolvers: &[AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>],
+    quiet_flag: bool,
+) -> HashSet<String> {
+    if !quiet_flag {
+        println!("Running wildcards detection for {}...\n", target)
+    }
+    let mut generated_wilcards: HashSet<String> = HashSet::new();
+    for _ in 1..20 {
+        generated_wilcards.insert(format!(
+            "{}.{}",
+            rng()
+                .sample_iter(Alphanumeric)
+                .take(15)
+                .map(char::from)
+                .collect::<String>(),
+            target
+        ));
+    }
+
+    generated_wilcards = stream::iter(generated_wilcards.clone().into_iter().map(
+        |host| async move {
+            if let Ok(ips) = resolvers
+                .choose(&mut rng())
+                .expect("failed to retrieve DNS resolver")
+                .ipv4_lookup(host.clone())
+                .await
+            {
+                ips.into_iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>()
+            } else {
+                Vec::new()
+            }
+        },
+    ))
+    .buffer_unordered(20)
+    .map(stream::iter)
+    .flatten()
+    .collect()
+    .await;
+
+    generated_wilcards.retain(|ip| ip.parse::<Ipv4Addr>().is_ok());
+
+    if !generated_wilcards.is_empty() && !quiet_flag {
+        println!(
+            "Wilcards detected for {} and wildcard's IP saved for furter work.",
+            target
+        );
+        println!("Wilcard IPs: {:?}\n", generated_wilcards)
+    } else if !quiet_flag {
+        println!("No wilcards detected for {}, nice!\n", target)
+    }
+    generated_wilcards
 }
