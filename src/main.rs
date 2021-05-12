@@ -219,7 +219,7 @@ async fn detect_wildcards(
         println!("Running wildcards detection for {}...\n", target)
     }
     let mut generated_wilcards: HashSet<String> = HashSet::new();
-    for _ in 1..20 {
+    for _ in 1..10 {
         generated_wilcards.insert(format!(
             "{}.{}",
             rng()
@@ -247,7 +247,7 @@ async fn detect_wildcards(
             }
         },
     ))
-    .buffer_unordered(20)
+    .buffer_unordered(10)
     .map(stream::iter)
     .flatten()
     .collect()
