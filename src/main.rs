@@ -1,10 +1,10 @@
 use {
     clap::{value_t, App, Arg},
     futures::stream::{self, StreamExt},
-    rand::{distributions::Alphanumeric, prelude::SliceRandom, thread_rng as rng, Rng},
+    rand::{distributions::Alphanumeric, thread_rng as rng, Rng},
     std::{
         collections::HashSet,
-        net::{IpAddr, Ipv4Addr},
+        net::{Ipv4Addr, SocketAddr},
     },
     tokio::{
         self,
@@ -12,7 +12,10 @@ use {
         io::{self, AsyncReadExt},
     },
     trust_dns_resolver::{
-        config::{NameServerConfigGroup, ResolverConfig, ResolverOpts},
+        config::{
+            LookupIpStrategy, NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig,
+            ResolverOpts,
+        },
         name_server::{GenericConnection, GenericConnectionProvider, TokioRuntime},
         AsyncResolver, TokioAsyncResolver,
     },
@@ -31,7 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .long("threads")
                 .takes_value(true)
                 .help("Number of threads. Default: 100"),
-        ).arg(
+        )
+        .arg(
+            Arg::with_name("retries")
+                .long("retries")
+                .takes_value(true)
+                .help("Number of retries after lookup failure before giving up. Defaults to 0"),
+        )
+        .arg(
             Arg::with_name("domain")
                 .short("d")
                 .long("domain")
@@ -71,48 +81,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let show_ip_adress = matches.is_present("ip");
     let threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|_| 100);
     let timeout = value_t!(matches.value_of("timeout"), u64).unwrap_or_else(|_| 1);
+    let retries = value_t!(matches.value_of("retries"), usize).unwrap_or_else(|_| 0);
     let quiet_flag = matches.is_present("quiet");
 
     // Resolver opts
     let options = ResolverOpts {
         timeout: std::time::Duration::from_secs(timeout),
+        attempts: retries,
+        ip_strategy: LookupIpStrategy::Ipv4Only,
         ..Default::default()
     };
 
     // Create resolvers
-    let mut dns_ips = HashSet::new();
+    let mut nameserver_ips = HashSet::new();
 
     if matches.is_present("resolvers") {
-        dns_ips = return_file_lines(value_t!(matches.value_of("resolvers"), String).unwrap()).await;
+        nameserver_ips =
+            return_file_lines(value_t!(matches.value_of("resolvers"), String).unwrap()).await;
     } else {
-        let built_in_dns = vec![
+        let built_in_nameservers = vec![
             // Cloudflare
-            "1.1.1.1",
-            "1.0.0.1",
+            "1.1.1.1:53",
+            "1.0.0.1:53",
             // Google
-            "8.8.8.8",
-            "8.8.4.4",
+            "8.8.8.8:53",
+            "8.8.4.4:53",
             // Quad9
-            "9.9.9.9",
-            "149.112.112.112",
+            "9.9.9.9:53",
+            "149.112.112.112:53",
             // OpenDNS
-            "208.67.222.222",
-            "208.67.220.220",
+            "208.67.222.222:53",
+            "208.67.220.220:53",
             // Verisign
-            "64.6.64.6",
-            "64.6.65.6",
+            "64.6.64.6:53",
+            "64.6.65.6:53",
             // UncensoredDNS
-            "91.239.100.100",
-            "89.233.43.71",
+            "91.239.100.100:53",
+            "89.233.43.71:53",
             // dns.watch
-            "84.200.69.80",
-            "84.200.70.40",
+            "84.200.69.80:53",
+            "84.200.70.40:53",
         ];
-        for ip in built_in_dns {
-            dns_ips.insert(ip.to_string());
+        for ip in built_in_nameservers {
+            nameserver_ips.insert(ip.to_string());
         }
     }
-    let resolvers = return_tokio_dns(dns_ips, options).await;
+    let resolvers = return_tokio_asyncresolver(nameserver_ips, options);
     let mut wildcard_ips = HashSet::new();
 
     // Read stdin
@@ -132,10 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     futures::stream::iter(hosts.into_iter().map(|host| {
-        let resolver_fut = resolvers
-            .choose(&mut rng())
-            .expect("failed to retrieve DNS resolver")
-            .ipv4_lookup(host.clone());
+        let resolver_fut = resolvers.ipv4_lookup(host.clone());
         let wildcard_ips = wildcard_ips.clone();
         async move {
             if let Ok(ip) = resolver_fut.await {
@@ -173,46 +184,48 @@ async fn return_file_lines(file: String) -> HashSet<String> {
         Ok(a) => a,
         _ => unreachable!("Error reading to string."),
     };
-    buffer.lines().map(str::to_owned).collect()
+    buffer.lines().map(|f| format!("{}:53", f)).collect()
 }
 
-async fn return_tokio_dns(
-    dns_ips: HashSet<String>,
+fn return_tokio_asyncresolver(
+    nameserver_ips: HashSet<String>,
     options: ResolverOpts,
-) -> Vec<AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>> {
-    let mut resolvers = Vec::new();
-    for ip in dns_ips {
-        resolvers.push(
-            TokioAsyncResolver::tokio(
-                ResolverConfig::from_parts(
-                    None,
-                    vec![],
-                    NameServerConfigGroup::from_ips_clear(
-                        &[IpAddr::V4(match ip.parse() {
-                            Ok(a) => a,
-                            Err(e) => {
-                                eprintln!(
-                                    "Error adding {} to the list of resolvers, only IPv4 addresses are allowed. Please fix the problem and try again. Error: {}",
-                                    ip, e
-                                );
-                                std::process::exit(1)
-                            }
-                        })],
-                        53,
-                        false,
-                    ),
-                ),
-                options,
-            )
-            .unwrap(),
-        )
-    }
-    resolvers
+) -> AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>> {
+    let mut name_servers = NameServerConfigGroup::with_capacity(nameserver_ips.len() * 2);
+
+    name_servers.extend(nameserver_ips.into_iter().flat_map(|server| {
+        let socket_addr = SocketAddr::V4(match server.parse() {
+            Ok(a) => a,
+            Err(e) => unreachable!(
+                "Error parsing the server {}, only IPv4 are allowed. Error: {}",
+                server, e
+            ),
+        });
+
+        std::iter::once(NameServerConfig {
+            socket_addr,
+            protocol: Protocol::Udp,
+            tls_dns_name: None,
+            trust_nx_responses: false,
+        })
+        .chain(std::iter::once(NameServerConfig {
+            socket_addr,
+            protocol: Protocol::Tcp,
+            tls_dns_name: None,
+            trust_nx_responses: false,
+        }))
+    }));
+
+    TokioAsyncResolver::tokio(
+        ResolverConfig::from_parts(None, vec![], name_servers),
+        options,
+    )
+    .unwrap()
 }
 
 async fn detect_wildcards(
     target: &str,
-    resolvers: &[AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>],
+    resolvers: &AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
     quiet_flag: bool,
 ) -> HashSet<String> {
     if !quiet_flag {
@@ -233,12 +246,7 @@ async fn detect_wildcards(
 
     generated_wilcards = stream::iter(generated_wilcards.clone().into_iter().map(
         |host| async move {
-            if let Ok(ips) = resolvers
-                .choose(&mut rng())
-                .expect("failed to retrieve DNS resolver")
-                .ipv4_lookup(host.clone())
-                .await
-            {
+            if let Ok(ips) = resolvers.ipv4_lookup(host.clone()).await {
                 ips.into_iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<String>>()
