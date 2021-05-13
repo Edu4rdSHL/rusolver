@@ -89,6 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         timeout: std::time::Duration::from_secs(timeout),
         attempts: retries,
         ip_strategy: LookupIpStrategy::Ipv4Only,
+        num_concurrent_reqs: 1,
         ..Default::default()
     };
 
