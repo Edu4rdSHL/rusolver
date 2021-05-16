@@ -14,6 +14,6 @@ readme = "README.md"
 [dependencies]
 tokio = { version = "1.5.0", features = ["full"] }
 futures = "0.3.14"
-trust-dns-resolver = "0.20.2"
+trust-dns-resolver = { git = "https://github.com/Edu4rdSHL/trust-dns", branch = "main" }
 clap = "2.33.3"
 rand = "0.8.3"
