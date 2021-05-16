@@ -1,2 +1,5 @@
 /target
 /*.txt
+resolvers
+.gitignore
+wordlist
