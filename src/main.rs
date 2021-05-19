@@ -69,6 +69,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .help("Show the discovered IP addresses. Default: false"),
         )
         .arg(
+            Arg::with_name("no-verify")
+                .long("no-verify")
+                .takes_value(false)
+                .help("Disables the double verification algorithm for valid subdomains -NOT RECOMMENDED-. Default: false"),
+        )
+        .arg(
             Arg::with_name("quiet")
                 .short("q")
                 .long("quiet")
@@ -83,6 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let timeout = value_t!(matches.value_of("timeout"), u64).unwrap_or_else(|_| 1);
     let retries = value_t!(matches.value_of("retries"), usize).unwrap_or_else(|_| 0);
     let quiet_flag = matches.is_present("quiet");
+    let custom_resolvers = matches.is_present("resolvers");
+    let disable_double_check = matches.is_present("no-verify") && custom_resolvers;
 
     // Resolver opts
     let options = ResolverOpts {
@@ -93,41 +101,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    // Create resolvers
-    let mut nameserver_ips = HashSet::new();
+    let built_in_nameservers: HashSet<String> = vec![
+        // Cloudflare
+        "1.1.1.1:53",
+        "1.0.0.1:53",
+        // Google
+        "8.8.8.8:53",
+        "8.8.4.4:53",
+        // Quad9
+        "9.9.9.9:53",
+        "149.112.112.112:53",
+        // OpenDNS
+        "208.67.222.222:53",
+        "208.67.220.220:53",
+        // Verisign
+        "64.6.64.6:53",
+        "64.6.65.6:53",
+        // UncensoredDNS
+        "91.239.100.100:53",
+        "89.233.43.71:53",
+        // dns.watch
+        "84.200.69.80:53",
+        "84.200.70.40:53",
+    ]
+    .iter()
+    .map(|x| x.to_string())
+    .collect();
 
-    if matches.is_present("resolvers") {
+    // Create resolvers
+    let nameserver_ips;
+
+    if custom_resolvers {
         nameserver_ips =
             return_file_lines(value_t!(matches.value_of("resolvers"), String).unwrap()).await;
     } else {
-        let built_in_nameservers = vec![
-            // Cloudflare
-            "1.1.1.1:53",
-            "1.0.0.1:53",
-            // Google
-            "8.8.8.8:53",
-            "8.8.4.4:53",
-            // Quad9
-            "9.9.9.9:53",
-            "149.112.112.112:53",
-            // OpenDNS
-            "208.67.222.222:53",
-            "208.67.220.220:53",
-            // Verisign
-            "64.6.64.6:53",
-            "64.6.65.6:53",
-            // UncensoredDNS
-            "91.239.100.100:53",
-            "89.233.43.71:53",
-            // dns.watch
-            "84.200.69.80:53",
-            "84.200.70.40:53",
-        ];
-        for ip in built_in_nameservers {
-            nameserver_ips.insert(ip.to_string());
-        }
+        nameserver_ips = built_in_nameservers.clone();
     }
     let resolvers = return_tokio_asyncresolver(nameserver_ips, options);
+    let trustable_resolver = return_tokio_asyncresolver(built_in_nameservers, options);
     let mut wildcard_ips = HashSet::new();
 
     // Read stdin
@@ -148,13 +159,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     futures::stream::iter(hosts.into_iter().map(|host| {
         let resolver_fut = resolvers.ipv4_lookup(host.clone());
+        let trustable_resolver_fut = trustable_resolver.ipv4_lookup(host.clone());
         let wildcard_ips = wildcard_ips.clone();
         async move {
             if let Ok(ip) = resolver_fut.await {
-                let ips = ip
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect::<HashSet<String>>();
+                let mut ips = HashSet::new();
+                if disable_double_check {
+                    ips = ip
+                        .into_iter()
+                        .map(|x| x.to_string())
+                        .collect::<HashSet<String>>();
+                } else if let Ok(ip) = trustable_resolver_fut.await {
+                    ips = ip
+                        .into_iter()
+                        .map(|x| x.to_string())
+                        .collect::<HashSet<String>>();
+                }
                 if show_ip_adress && !ips.iter().all(|ip| wildcard_ips.contains(ip)) {
                     println!("{};{:?}", host, ips)
                 } else if !ips.iter().all(|ip| wildcard_ips.contains(ip)) {
