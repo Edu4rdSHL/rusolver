@@ -129,11 +129,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .collect();
 
     // Create resolvers
-    let nameserver_ips;
+    let mut nameserver_ips;
 
     if custom_resolvers {
         nameserver_ips =
             return_file_lines(value_t!(matches.value_of("resolvers"), String).unwrap()).await;
+        nameserver_ips.retain(|ip| !ip.is_empty());
     } else {
         nameserver_ips = built_in_nameservers.clone();
     }
