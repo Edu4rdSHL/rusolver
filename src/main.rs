@@ -148,7 +148,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let hosts: Vec<String> = if matches.is_present("domain") {
         let domain = value_t!(matches, "domain", String).unwrap();
-        wildcard_ips = detect_wildcards(&domain, &resolvers, quiet_flag).await;
+        wildcard_ips = detect_wildcards(&domain, &trustable_resolver, quiet_flag).await;
         buffer
             .lines()
             .map(|word| format!("{}.{}", word, domain))
@@ -253,9 +253,9 @@ async fn detect_wildcards(
         println!("Running wildcards detection for {}...\n", target)
     }
     let mut generated_wilcards: HashSet<String> = HashSet::new();
-    for _ in 1..10 {
+    for _ in 1..20 {
         generated_wilcards.insert(format!(
-            "{}.{}",
+            "{}.{}.",
             rng()
                 .sample_iter(Alphanumeric)
                 .take(15)
