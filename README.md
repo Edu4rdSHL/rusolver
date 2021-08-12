@@ -4,8 +4,8 @@ Fast DNS resolver written in Rust. Works on Linux, Windows, macOS, Android, Aarc
 # Goal
 Offer the community an efficient host resolution tool.
 
-# Performance & speed
-Rusolver is **very** resource friendly, you can use up to 1000 threads in an single core machine and this will work without any problem, the bottleneck for this tool is your network speed. By default, Rusolver is able to perform resolution for ~1532 hosts per second in good network conditions (tested in an AWS machine).
+# Performance, speed and accuracy
+Rusolver is **very** resource friendly, you can use up to 1000 threads in an single core machine and this will work without any problem, the bottleneck for this tool is your network speed. By default, Rusolver is able to perform resolution for ~1532 hosts per second in good network conditions (tested in an AWS machine). Additionally the tool does a double-check by default for resolved hosts against Cloudflare, Google, Quad9, OpenDNS, Verisign, UncensoredDNS and dns.watch DNS, with that algoritm the possibility to get an false-positive is null.
 
 ## Demo
 
