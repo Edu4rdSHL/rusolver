@@ -1,6 +1,6 @@
 [package]
 name = "rusolver"
-version = "0.6.1"
+version = "0.7.0"
 authors = ["Eduard Tolosa <edu4rdshl@protonmail.com>"]
 edition = "2018"
 description = "Fast DNS resolver written in Rust."
@@ -12,7 +12,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.6.0", features = ["full"] }
+tokio = { version = "1.6.1", features = ["full"] }
 futures = "0.3.15"
 trust-dns-resolver = { git = "https://github.com/Edu4rdSHL/trust-dns", branch = "main" }
 clap = "2.33.3"
