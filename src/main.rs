@@ -158,23 +158,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         buffer.lines().map(str::to_owned).collect()
     };
 
-    futures::stream::iter(hosts.into_iter().map(|host| {
-        let resolver_fut = resolvers.ipv4_lookup(host.clone());
-        let trustable_resolver_fut = trustable_resolver.ipv4_lookup(host.clone());
-        let wildcard_ips = wildcard_ips.clone();
-        async move {
-            if let Ok(ip) = resolver_fut.await {
+    stream::iter(hosts)
+        .map(|host| {
+            let resolver_fut = resolvers.ipv4_lookup(host.clone() + ".");
+            let trustable_resolver_fut = trustable_resolver.ipv4_lookup(host.clone() + ".");
+            let wildcard_ips = wildcard_ips.clone();
+
+            async move {
                 let mut ips = HashSet::new();
-                if disable_double_check {
-                    ips = ip
-                        .into_iter()
-                        .map(|x| x.to_string())
-                        .collect::<HashSet<String>>();
-                } else if let Ok(ip) = trustable_resolver_fut.await {
-                    ips = ip
-                        .into_iter()
-                        .map(|x| x.to_string())
-                        .collect::<HashSet<String>>();
+                if let Ok(ip) = resolver_fut.await {
+                    if disable_double_check {
+                        ips = ip
+                            .into_iter()
+                            .map(|x| x.to_string())
+                            .collect::<HashSet<String>>();
+                    } else if let Ok(ip) = trustable_resolver_fut.await {
+                        ips = ip
+                            .into_iter()
+                            .map(|x| x.to_string())
+                            .collect::<HashSet<String>>();
+                    }
                 }
                 if show_ip_adress && !ips.iter().all(|ip| wildcard_ips.contains(ip)) {
                     println!("{};{:?}", host, ips)
@@ -182,11 +185,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("{}", host)
                 }
             }
-        }
-    }))
-    .buffer_unordered(threads)
-    .collect::<Vec<()>>()
-    .await;
+        })
+        .buffer_unordered(threads)
+        .collect::<Vec<()>>()
+        .await;
+
     Ok(())
 }
 
