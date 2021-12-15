@@ -160,8 +160,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     stream::iter(hosts)
         .map(|host| {
-            let resolver_fut = resolvers.ipv4_lookup(host.clone() + ".");
-            let trustable_resolver_fut = trustable_resolver.ipv4_lookup(host.clone() + ".");
+            let resolver_fut = resolvers.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
+            let trustable_resolver_fut =
+                trustable_resolver.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
             let wildcard_ips = wildcard_ips.clone();
 
             async move {
