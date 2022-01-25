@@ -669,8 +669,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-proto"
-version = "0.20.1"
-source = "git+https://github.com/Edu4rdSHL/trust-dns?branch=main#451a00fbe3c0972adb4cdbd9d2e2f2a39a44da0e"
+version = "0.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad0d7f5db438199a6e2609debe3f69f808d074e0a2888ee0bccb45fe234d03f4"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -693,8 +694,9 @@ dependencies = [
 
 [[package]]
 name = "trust-dns-resolver"
-version = "0.20.1"
-source = "git+https://github.com/Edu4rdSHL/trust-dns?branch=main#451a00fbe3c0972adb4cdbd9d2e2f2a39a44da0e"
+version = "0.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6ad17b608a64bd0735e67bde16b0636f8aa8591f831a25d18443ed00a699770"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -703,7 +705,6 @@ dependencies = [
  "log",
  "lru-cache",
  "parking_lot",
- "rand",
  "resolv-conf",
  "smallvec",
  "thiserror",
