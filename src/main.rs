@@ -1,25 +1,18 @@
 use {
     clap::{value_t, App, Arg},
     futures::stream::{self, StreamExt},
-    rand::{distributions::Alphanumeric, thread_rng as rng, Rng},
-    std::{
-        collections::HashSet,
-        net::{Ipv4Addr, SocketAddr},
-    },
+    rusolver::{resolver, utils},
+    std::collections::HashSet,
     tokio::{
         self,
-        fs::File,
         io::{self, AsyncReadExt},
     },
-    trust_dns_resolver::{
-        config::{
-            LookupIpStrategy, NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig,
-            ResolverOpts,
-        },
-        name_server::{GenericConnection, GenericConnectionProvider, TokioRuntime},
-        AsyncResolver, TokioAsyncResolver,
-    },
+    trust_dns_resolver::config::{LookupIpStrategy, ResolverOpts},
 };
+
+// Please add support for AAAA, TXT, SRV, NAPTR, PTR, CNAME, DNAME, MX, NS, SOA, LOC, SVCB, HTTPS, SPF, CAA and AVC resource records.
+// This could use a new command line option such as -t, e.g. echo www.example.com | rusolver -i -t AAAA. It might also make sense
+// to change -i/--ip to -d/--data with the text Display the record data.
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -133,13 +126,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if custom_resolvers {
         nameserver_ips =
-            return_file_lines(value_t!(matches.value_of("resolvers"), String).unwrap()).await;
+            utils::return_file_lines(value_t!(matches.value_of("resolvers"), String).unwrap())
+                .await;
         nameserver_ips.retain(|ip| !ip.is_empty());
     } else {
         nameserver_ips = built_in_nameservers.clone();
     }
-    let resolvers = return_tokio_asyncresolver(nameserver_ips, options);
-    let trustable_resolver = return_tokio_asyncresolver(built_in_nameservers, options);
+    let resolvers = resolver::return_tokio_asyncresolver(nameserver_ips, options);
+    let trustable_resolver = resolver::return_tokio_asyncresolver(built_in_nameservers, options);
     let mut wildcard_ips = HashSet::new();
 
     // Read stdin
@@ -149,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let hosts: Vec<String> = if matches.is_present("domain") {
         let domain = value_t!(matches, "domain", String).unwrap();
-        wildcard_ips = detect_wildcards(&domain, &trustable_resolver, quiet_flag).await;
+        wildcard_ips = utils::detect_wildcards(&domain, &trustable_resolver, quiet_flag).await;
         buffer
             .lines()
             .map(|word| format!("{}.{}", word, domain))
@@ -192,111 +186,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     Ok(())
-}
-
-// In the future I may need to implement error propagation, but for now it's fine
-// to deal with matches
-async fn return_file_lines(file: String) -> HashSet<String> {
-    let mut f = match File::open(&file).await {
-        Ok(file) => file,
-        Err(e) => {
-            eprintln!("Error opening resolvers file. Error: {}", e);
-            std::process::exit(1)
-        }
-    };
-    let mut buffer = String::new();
-
-    match f.read_to_string(&mut buffer).await {
-        Ok(a) => a,
-        _ => unreachable!("Error reading to string."),
-    };
-    buffer.lines().map(|f| format!("{}:53", f)).collect()
-}
-
-fn return_tokio_asyncresolver(
-    nameserver_ips: HashSet<String>,
-    options: ResolverOpts,
-) -> AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>> {
-    let mut name_servers = NameServerConfigGroup::with_capacity(nameserver_ips.len() * 2);
-
-    name_servers.extend(nameserver_ips.into_iter().flat_map(|server| {
-        let socket_addr = SocketAddr::V4(match server.parse() {
-            Ok(a) => a,
-            Err(e) => unreachable!(
-                "Error parsing the server {}, only IPv4 are allowed. Error: {}",
-                server, e
-            ),
-        });
-
-        std::iter::once(NameServerConfig {
-            socket_addr,
-            protocol: Protocol::Udp,
-            tls_dns_name: None,
-            trust_nx_responses: false,
-        })
-        .chain(std::iter::once(NameServerConfig {
-            socket_addr,
-            protocol: Protocol::Tcp,
-            tls_dns_name: None,
-            trust_nx_responses: false,
-        }))
-    }));
-
-    TokioAsyncResolver::tokio(
-        ResolverConfig::from_parts(None, vec![], name_servers),
-        options,
-    )
-    .unwrap()
-}
-
-async fn detect_wildcards(
-    target: &str,
-    resolvers: &AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
-    quiet_flag: bool,
-) -> HashSet<String> {
-    if !quiet_flag {
-        println!("Running wildcards detection for {}...\n", target)
-    }
-    let mut generated_wilcards: HashSet<String> = HashSet::new();
-    for _ in 1..20 {
-        generated_wilcards.insert(format!(
-            "{}.{}.",
-            rng()
-                .sample_iter(Alphanumeric)
-                .take(15)
-                .map(char::from)
-                .collect::<String>(),
-            target
-        ));
-    }
-
-    generated_wilcards = stream::iter(generated_wilcards.clone().into_iter().map(
-        |host| async move {
-            if let Ok(ips) = resolvers.ipv4_lookup(host.clone()).await {
-                ips.into_iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<String>>()
-            } else {
-                Vec::new()
-            }
-        },
-    ))
-    .buffer_unordered(10)
-    .map(stream::iter)
-    .flatten()
-    .collect()
-    .await;
-
-    generated_wilcards.retain(|ip| ip.parse::<Ipv4Addr>().is_ok());
-
-    if !generated_wilcards.is_empty() && !quiet_flag {
-        println!(
-            "Wilcards detected for {} and wildcard's IP saved for furter work.",
-            target
-        );
-        println!("Wilcard IPs: {:?}\n", generated_wilcards)
-    } else if !quiet_flag {
-        println!("No wilcards detected for {}, nice!\n", target)
-    }
-    generated_wilcards
 }
