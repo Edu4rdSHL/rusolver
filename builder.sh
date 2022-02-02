@@ -65,11 +65,11 @@ else
   echo "Please install the help2man package."
 fi
 
-if command -v git >/dev/null; then
-  git add .
-  git commit -m "Bump version."
-  git push
-fi
+#if command -v git >/dev/null; then
+#  git add .
+#  git commit -m "Bump version."
+#  git push
+#fi
 
 #echo "Uploading crate to crates.io..."
 #if cargo publish --no-verify > /dev/null; then
