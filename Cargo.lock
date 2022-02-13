@@ -646,7 +646,7 @@ dependencies = [
 [[package]]
 name = "trust-dns-proto"
 version = "0.20.4"
-source = "git+https://github.com/Findomain/trust-dns?branch=custombranch#f05c9a33b59a932b0b2aea115cedd14cc3958b5f"
+source = "git+https://github.com/Findomain/trust-dns?branch=custombranch#f339a5e806bed9109ad205d2143d8b18701d2ab0"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -670,7 +670,7 @@ dependencies = [
 [[package]]
 name = "trust-dns-resolver"
 version = "0.20.4"
-source = "git+https://github.com/Findomain/trust-dns?branch=custombranch#f05c9a33b59a932b0b2aea115cedd14cc3958b5f"
+source = "git+https://github.com/Findomain/trust-dns?branch=custombranch#f339a5e806bed9109ad205d2143d8b18701d2ab0"
 dependencies = [
  "cfg-if",
  "futures-util",
