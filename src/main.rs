@@ -90,6 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         attempts: retries,
         ip_strategy: LookupIpStrategy::Ipv4Only,
         num_concurrent_reqs: 1,
+        shuffle_dns_servers: true,
         ..Default::default()
     };
 
