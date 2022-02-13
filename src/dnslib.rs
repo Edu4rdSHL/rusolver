@@ -72,9 +72,9 @@ pub async fn return_hosts_data(
                 trustable_resolver.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
             let wildcard_ips = wildcard_ips.clone();
 
-            async move {
-                let mut domain_data = DomainData::default();
+            let mut domain_data = DomainData::default();
 
+            async move {
                 if let Ok(ip) = resolver_fut.await {
                     if disable_double_check {
                         domain_data.ipv4_addresses = ip
