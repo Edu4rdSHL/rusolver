@@ -1,4 +1,3 @@
-pub mod resolver;
+pub mod dnslib;
+pub mod structs;
 pub mod utils;
-
-mod structs;

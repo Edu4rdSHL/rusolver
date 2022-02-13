@@ -1,7 +1,6 @@
 use {
     clap::{value_t, App, Arg},
-    futures::stream::{self, StreamExt},
-    rusolver::{resolver, utils},
+    rusolver::{dnslib, utils},
     std::collections::HashSet,
     tokio::{
         self,
@@ -52,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Arg::with_name("timeout")
                 .long("timeout")
                 .takes_value(true)
-                .help("Timeout in seconds. Default: 1"),
+                .help("Timeout in seconds. Default: 3"),
         )
         .arg(
             Arg::with_name("ip")
@@ -79,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Assign values or use defaults
     let show_ip_adress = matches.is_present("ip");
     let threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|_| 100);
-    let timeout = value_t!(matches.value_of("timeout"), u64).unwrap_or_else(|_| 1);
+    let timeout = value_t!(matches.value_of("timeout"), u64).unwrap_or_else(|_| 3);
     let retries = value_t!(matches.value_of("retries"), usize).unwrap_or_else(|_| 0);
     let quiet_flag = matches.is_present("quiet");
     let custom_resolvers = matches.is_present("resolvers");
@@ -132,8 +131,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         nameserver_ips = built_in_nameservers.clone();
     }
-    let resolvers = resolver::return_tokio_asyncresolver(nameserver_ips, options);
-    let trustable_resolver = resolver::return_tokio_asyncresolver(built_in_nameservers, options);
+    let resolvers = dnslib::return_tokio_asyncresolver(nameserver_ips, options);
+    let trustable_resolver = dnslib::return_tokio_asyncresolver(built_in_nameservers, options);
     let mut wildcard_ips = HashSet::new();
 
     // Read stdin
@@ -141,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stdin = io::stdin();
     stdin.read_to_string(&mut buffer).await?;
 
-    let hosts: Vec<String> = if matches.is_present("domain") {
+    let hosts: HashSet<String> = if matches.is_present("domain") {
         let domain = value_t!(matches, "domain", String).unwrap();
         wildcard_ips = utils::detect_wildcards(&domain, &trustable_resolver, quiet_flag).await;
         buffer
@@ -152,38 +151,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         buffer.lines().map(str::to_owned).collect()
     };
 
-    stream::iter(hosts)
-        .map(|host| {
-            let resolver_fut = resolvers.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
-            let trustable_resolver_fut =
-                trustable_resolver.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
-            let wildcard_ips = wildcard_ips.clone();
-
-            async move {
-                let mut ips = HashSet::new();
-                if let Ok(ip) = resolver_fut.await {
-                    if disable_double_check {
-                        ips = ip
-                            .into_iter()
-                            .map(|x| x.to_string())
-                            .collect::<HashSet<String>>();
-                    } else if let Ok(ip) = trustable_resolver_fut.await {
-                        ips = ip
-                            .into_iter()
-                            .map(|x| x.to_string())
-                            .collect::<HashSet<String>>();
-                    }
-                }
-                if show_ip_adress && !ips.iter().all(|ip| wildcard_ips.contains(ip)) {
-                    println!("{};{:?}", host, ips)
-                } else if !ips.iter().all(|ip| wildcard_ips.contains(ip)) {
-                    println!("{}", host)
-                }
-            }
-        })
-        .buffer_unordered(threads)
-        .collect::<Vec<()>>()
-        .await;
+    dnslib::return_hosts_data(
+        hosts,
+        resolvers,
+        trustable_resolver,
+        wildcard_ips,
+        disable_double_check,
+        threads,
+        show_ip_adress,
+        false,
+    )
+    .await;
 
     Ok(())
 }
