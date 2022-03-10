@@ -1,3 +1,5 @@
+use trust_dns_resolver::proto::{rr::RecordType, xfer::DnsRequestOptions};
+
 use {
     crate::structs::DomainData,
     futures::stream::{self, StreamExt},
@@ -53,7 +55,7 @@ pub fn return_tokio_asyncresolver(
 #[allow(clippy::too_many_arguments)]
 pub async fn return_hosts_data(
     hosts: HashSet<String>,
-    resolvers: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
+    resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
     trustable_resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
     wildcard_ips: HashSet<String>,
     disable_double_check: bool,
@@ -67,7 +69,7 @@ pub async fn return_hosts_data(
 
     stream::iter(hosts)
         .map(|host| {
-            let resolver_fut = resolvers.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
+            let resolver_fut = resolver.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
             let trustable_resolver_fut =
                 trustable_resolver.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
             let wildcard_ips = wildcard_ips.clone();
@@ -101,6 +103,66 @@ pub async fn return_hosts_data(
                     }
                 }
 
+                (host, domain_data)
+            }
+        })
+        .buffer_unordered(threads)
+        .collect::<HashMap<String, DomainData>>()
+        .await
+}
+
+// Used internally for now
+pub async fn return_cname_data(
+    hosts: HashSet<String>,
+    resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
+    trustable_resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
+    disable_double_check: bool,
+    mut threads: usize,
+) -> HashMap<String, DomainData> {
+    if hosts.len() < threads {
+        threads = hosts.len();
+    }
+
+    let request_options = DnsRequestOptions::default();
+    let record_type = RecordType::CNAME;
+
+    stream::iter(hosts)
+        .map(|host| {
+            let resolver_fut = resolver.lookup(
+                host.trim_end_matches('.').to_owned() + ".",
+                record_type,
+                request_options,
+            );
+            let trustable_resolver_fut = trustable_resolver.lookup(
+                host.trim_end_matches('.').to_owned() + ".",
+                record_type,
+                request_options,
+            );
+
+            let mut domain_data = DomainData::default();
+
+            async move {
+                if let Ok(lookup) = resolver_fut.await {
+                    if disable_double_check {
+                        domain_data.cname = lookup
+                            .iter()
+                            .filter_map(|rdata| rdata.as_cname())
+                            .map(|name| {
+                                let name = name.to_string();
+                                name[..name.len() - 1].to_owned()
+                            })
+                            .collect();
+                    } else if let Ok(lookup) = trustable_resolver_fut.await {
+                        domain_data.cname = lookup
+                            .iter()
+                            .filter_map(|rdata| rdata.as_cname())
+                            .map(|name| {
+                                let name = name.to_string();
+                                name[..name.len() - 1].to_owned()
+                            })
+                            .collect();
+                    }
+                }
                 (host, domain_data)
             }
         })
