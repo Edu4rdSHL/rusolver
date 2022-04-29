@@ -1,6 +1,6 @@
 use {
     clap::{value_t, App, Arg},
-    rusolver::{dnslib, utils},
+    rusolver::{dnslib, structs, utils},
     std::collections::HashSet,
     tokio::{
         self,
@@ -9,7 +9,7 @@ use {
     trust_dns_resolver::config::{LookupIpStrategy, ResolverOpts},
 };
 
-// Please add support for AAAA, TXT, SRV, NAPTR, PTR, CNAME, DNAME, MX, NS, SOA, LOC, SVCB, HTTPS, SPF, CAA and AVC resource records.
+// WIP: add support for AAAA, TXT, SRV, NAPTR, PTR, CNAME, DNAME, MX, NS, SOA, LOC, SVCB, HTTPS, SPF, CAA and AVC resource records.
 // This could use a new command line option such as -t, e.g. echo www.example.com | rusolver -i -t AAAA. It might also make sense
 // to change -i/--ip to -d/--data with the text Display the record data.
 
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_matches();
 
     // Assign values or use defaults
-    let show_ip_adress = matches.is_present("ip");
+    let show_ip_address = matches.is_present("ip");
     let threads = value_t!(matches.value_of("threads"), usize).unwrap_or_else(|_| 100);
     let timeout = value_t!(matches.value_of("timeout"), u64).unwrap_or_else(|_| 3);
     let retries = value_t!(matches.value_of("retries"), usize).unwrap_or_else(|_| 0);
@@ -118,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "84.200.70.40:53",
     ]
     .iter()
-    .map(|x| x.to_string())
+    .map(ToString::to_string)
     .collect();
 
     // Create resolvers
@@ -152,17 +152,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         buffer.lines().map(str::to_owned).collect()
     };
 
-    dnslib::return_hosts_data(
+    let options = structs::LibOptions {
         hosts,
         resolvers,
         trustable_resolver,
         wildcard_ips,
         disable_double_check,
         threads,
-        show_ip_adress,
-        false,
-    )
-    .await;
+        show_ip_address,
+        quiet_flag,
+    };
+
+    dnslib::return_hosts_data(&options).await;
 
     Ok(())
 }

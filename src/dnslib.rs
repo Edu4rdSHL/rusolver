@@ -1,17 +1,15 @@
-use trust_dns_resolver::proto::{rr::RecordType, xfer::DnsRequestOptions};
-
 use {
-    crate::structs::DomainData,
+    crate::structs::{DomainData, LibOptions},
     futures::stream::{self, StreamExt},
-    std::collections::{HashMap, HashSet},
-    trust_dns_resolver::config::ResolverOpts,
-};
-
-use {
-    std::net::SocketAddr,
+    std::{
+        collections::{HashMap, HashSet},
+        net::SocketAddr,
+    },
     trust_dns_resolver::{
-        config::{NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig},
+        config::{NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig, ResolverOpts},
+        lookup::{Ipv4Lookup, Lookup},
         name_server::{GenericConnection, GenericConnectionProvider, TokioRuntime},
+        proto::{rr::RecordType, xfer::DnsRequestOptions},
         AsyncResolver, TokioAsyncResolver,
     },
 };
@@ -52,63 +50,58 @@ pub fn return_tokio_asyncresolver(
     .unwrap()
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn return_hosts_data(
-    hosts: HashSet<String>,
-    resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
-    trustable_resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
-    wildcard_ips: HashSet<String>,
-    disable_double_check: bool,
-    mut threads: usize,
-    show_ip_addresses: bool,
-    quiet_flag: bool,
-) -> HashMap<String, DomainData> {
-    if hosts.len() < threads {
-        threads = hosts.len();
-    }
+pub async fn return_hosts_data(options: &LibOptions) -> HashMap<String, DomainData> {
+    let threads = if options.hosts.len() < options.threads {
+        options.hosts.len()
+    } else {
+        options.threads
+    };
 
-    stream::iter(hosts)
-        .map(|host| {
-            let resolver_fut = resolver.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
-            let trustable_resolver_fut =
-                trustable_resolver.ipv4_lookup(host.trim_end_matches('.').to_owned() + ".");
-            let wildcard_ips = wildcard_ips.clone();
+    stream::iter(options.hosts.clone().into_iter().map(|host| {
+        let lookup_host = host.trim_end_matches('.').to_owned() + ".";
 
-            let mut domain_data = DomainData::default();
+        let resolver_fut = options.resolvers.ipv4_lookup(lookup_host.clone());
+        let trustable_resolver_fut = options.trustable_resolver.ipv4_lookup(lookup_host);
+        let wildcard_ips = options.wildcard_ips.clone();
 
-            async move {
-                if let Ok(ip) = resolver_fut.await {
-                    if disable_double_check {
-                        domain_data.ipv4_addresses = ip
-                            .into_iter()
-                            .map(|x| x.to_string())
-                            .collect::<HashSet<String>>();
-                    } else if let Ok(ip) = trustable_resolver_fut.await {
-                        domain_data.ipv4_addresses = ip
-                            .into_iter()
-                            .map(|x| x.to_string())
-                            .collect::<HashSet<String>>();
-                    }
+        let mut domain_data = DomainData::default();
+
+        let mut ip_lookup = Option::<Ipv4Lookup>::None;
+
+        async move {
+            if let Ok(ip) = resolver_fut.await {
+                if options.disable_double_check {
+                    ip_lookup = Some(ip);
+                } else if let Ok(ip) = trustable_resolver_fut.await {
+                    ip_lookup = Some(ip);
                 }
-                domain_data.is_wildcard = domain_data
-                    .ipv4_addresses
-                    .iter()
-                    .all(|ip| wildcard_ips.contains(ip));
-
-                if !quiet_flag {
-                    if show_ip_addresses && !domain_data.is_wildcard {
-                        println!("{};{:?}", host, domain_data.ipv4_addresses);
-                    } else if !domain_data.is_wildcard {
-                        println!("{}", host)
-                    }
-                }
-
-                (host, domain_data)
             }
-        })
-        .buffer_unordered(threads)
-        .collect::<HashMap<String, DomainData>>()
-        .await
+
+            if let Some(ip_lookup) = ip_lookup {
+                for ip in ip_lookup.iter() {
+                    domain_data.ipv4_addresses.insert(ip.to_string());
+                }
+            }
+
+            domain_data.is_wildcard = domain_data
+                .ipv4_addresses
+                .iter()
+                .all(|ip| wildcard_ips.contains(ip));
+
+            if !options.quiet_flag {
+                if options.show_ip_address && !domain_data.is_wildcard {
+                    println!("{};{:?}", host, domain_data.ipv4_addresses);
+                } else if !domain_data.is_wildcard {
+                    println!("{}", host)
+                }
+            }
+
+            (host, domain_data)
+        }
+    }))
+    .buffer_unordered(threads)
+    .collect::<HashMap<String, DomainData>>()
+    .await
 }
 
 // Used internally for now
@@ -128,41 +121,32 @@ pub async fn return_cname_data(
 
     stream::iter(hosts)
         .map(|host| {
-            let resolver_fut = resolver.lookup(
-                host.trim_end_matches('.').to_owned() + ".",
-                record_type,
-                request_options,
-            );
-            let trustable_resolver_fut = trustable_resolver.lookup(
-                host.trim_end_matches('.').to_owned() + ".",
-                record_type,
-                request_options,
-            );
+            let lookup_host = host.trim_end_matches('.').to_owned() + ".";
+            let resolver_fut = resolver.lookup(lookup_host.clone(), record_type, request_options);
+            let trustable_resolver_fut =
+                trustable_resolver.lookup(lookup_host, record_type, request_options);
 
             let mut domain_data = DomainData::default();
+
+            let mut cname_lookup = Option::<Lookup>::None;
 
             async move {
                 if let Ok(lookup) = resolver_fut.await {
                     if disable_double_check {
-                        domain_data.cname = lookup
-                            .iter()
-                            .filter_map(|rdata| rdata.as_cname())
-                            .map(|name| {
-                                let name = name.to_string();
-                                name[..name.len() - 1].to_owned()
-                            })
-                            .collect();
+                        cname_lookup = Some(lookup);
                     } else if let Ok(lookup) = trustable_resolver_fut.await {
-                        domain_data.cname = lookup
-                            .iter()
-                            .filter_map(|rdata| rdata.as_cname())
-                            .map(|name| {
-                                let name = name.to_string();
-                                name[..name.len() - 1].to_owned()
-                            })
-                            .collect();
+                        cname_lookup = Some(lookup);
                     }
                 }
+
+                if let Some(lookup) = cname_lookup {
+                    for record in lookup.iter() {
+                        if let Some(cname) = record.as_cname() {
+                            domain_data.cname = cname.to_string();
+                        }
+                    }
+                }
+
                 (host, domain_data)
             }
         })
