@@ -14,6 +14,7 @@ use {
     },
 };
 
+#[must_use]
 pub fn return_tokio_asyncresolver(
     nameserver_ips: HashSet<String>,
     options: ResolverOpts,
@@ -92,7 +93,7 @@ pub async fn return_hosts_data(options: &LibOptions) -> HashMap<String, DomainDa
                 if options.show_ip_address && !domain_data.is_wildcard {
                     println!("{};{:?}", host, domain_data.ipv4_addresses);
                 } else if !domain_data.is_wildcard {
-                    println!("{}", host)
+                    println!("{host}");
                 }
             }
 

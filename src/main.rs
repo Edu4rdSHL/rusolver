@@ -146,7 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         wildcard_ips = utils::detect_wildcards(&domain, &trustable_resolver, quiet_flag).await;
         buffer
             .lines()
-            .map(|word| format!("{}.{}", word, domain))
+            .map(|word| format!("{word}.{domain}"))
             .collect()
     } else {
         buffer.lines().map(str::to_owned).collect()
