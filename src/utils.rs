@@ -89,7 +89,7 @@ pub async fn detect_wildcards(
 }
 
 pub fn print_domain_data(host: &str, domain_data: &DomainData, options: &LibOptions) {
-    if options.show_ip_address {
+    if options.show_ip_address && !domain_data.is_wildcard {
         println!("{}: {:?}", host, domain_data.ipv4_addresses);
     } else {
         println!("{}", host);

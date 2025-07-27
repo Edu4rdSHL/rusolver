@@ -85,7 +85,9 @@ pub async fn return_hosts_data(options: &LibOptions) -> HashMap<String, DomainDa
                 .iter()
                 .all(|ip| wildcard_ips.contains(ip));
 
-            print_domain_data(&host, &domain_data, &options);
+            if !options.quiet_flag {
+                print_domain_data(&host, &domain_data, options);
+            }
 
             (host, domain_data)
         }
