@@ -1,8 +1,8 @@
 [package]
 name = "rusolver"
-version = "0.9.1"
+version = "0.10.0"
 authors = ["Eduard Tolosa <edu4rdshl@protonmail.com>"]
-edition = "2018"
+edition = "2021"
 description = "Fast DNS resolver written in Rust."
 repository = "https://github.com/edu4rdshl/rusolver"
 license = "GPL-3.0-or-later"
@@ -12,20 +12,13 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.44.2", features = ["full"] }
+tokio = { version = "1.47.0", features = ["full"] }
 futures = "0.3.31"
-trust-dns-resolver = "0.20.4"
-# trust-dns-resolver = { git = "https://github.com/Edu4rdSHL/trust-dns", branch = "main" }
-clap = "2.34.0"
-rand = "0.8.5"
-
-# https://github.com/bluejekyll/trust-dns/pull/1632
-[patch.crates-io]
-trust-dns-resolver = { git = "https://github.com/Findomain/trust-dns", package = "trust-dns-resolver", branch = "custombranch" }
+hickory-resolver = "0.25.2"
+clap = { version = "4.5.41", features = ["derive"] }
+rand = "0.9.2"
 
 [profile.release]
 lto = true
 codegen-units = 1
 panic = 'abort'
-incremental = false
-opt-level = "s"

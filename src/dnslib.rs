@@ -1,54 +1,52 @@
 use {
-    crate::structs::{DomainData, LibOptions},
+    crate::{
+        structs::{DomainData, LibOptions},
+        utils::print_domain_data,
+    },
     futures::stream::{self, StreamExt},
+    hickory_resolver::{
+        config::{NameServerConfig, NameServerConfigGroup, ResolverConfig, ResolverOpts},
+        name_server::TokioConnectionProvider,
+        proto::{rr::RecordType, xfer::Protocol},
+        TokioResolver,
+    },
     std::{
         collections::{HashMap, HashSet},
         net::SocketAddr,
     },
-    trust_dns_resolver::{
-        config::{NameServerConfig, NameServerConfigGroup, Protocol, ResolverConfig, ResolverOpts},
-        lookup::{Ipv4Lookup, Lookup},
-        name_server::{GenericConnection, GenericConnectionProvider, TokioRuntime},
-        proto::{rr::RecordType, xfer::DnsRequestOptions},
-        AsyncResolver, TokioAsyncResolver,
-    },
 };
 
 #[must_use]
-pub fn return_tokio_asyncresolver(
-    nameserver_ips: HashSet<String>,
+pub fn return_tokio_asyncresolver<S: ::std::hash::BuildHasher>(
+    nameserver_ips: &HashSet<String, S>,
     options: ResolverOpts,
-) -> AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>> {
-    let mut name_servers = NameServerConfigGroup::with_capacity(nameserver_ips.len() * 2);
+) -> TokioResolver {
+    let mut name_servers = NameServerConfigGroup::with_capacity(nameserver_ips.len());
 
-    name_servers.extend(nameserver_ips.into_iter().flat_map(|server| {
-        let socket_addr = SocketAddr::V4(match server.parse() {
-            Ok(a) => a,
-            Err(e) => unreachable!(
+    name_servers.extend(nameserver_ips.iter().map(|server| {
+        let socket_addr = SocketAddr::V4(server.parse().unwrap_or_else(|e| {
+            panic!(
                 "Error parsing the server {}, only IPv4 are allowed. Error: {}",
                 server, e
-            ),
-        });
+            )
+        }));
 
-        std::iter::once(NameServerConfig {
+        NameServerConfig {
             socket_addr,
             protocol: Protocol::Udp,
             tls_dns_name: None,
-            trust_nx_responses: false,
-        })
-        .chain(std::iter::once(NameServerConfig {
-            socket_addr,
-            protocol: Protocol::Tcp,
-            tls_dns_name: None,
-            trust_nx_responses: false,
-        }))
+            http_endpoint: None,
+            trust_negative_responses: false,
+            bind_addr: None,
+        }
     }));
 
-    TokioAsyncResolver::tokio(
+    TokioResolver::builder_with_config(
         ResolverConfig::from_parts(None, vec![], name_servers),
-        options,
+        TokioConnectionProvider::default(),
     )
-    .unwrap()
+    .with_options(options)
+    .build()
 }
 
 pub async fn return_hosts_data(options: &LibOptions) -> HashMap<String, DomainData> {
@@ -59,24 +57,22 @@ pub async fn return_hosts_data(options: &LibOptions) -> HashMap<String, DomainDa
     };
 
     stream::iter(options.hosts.clone().into_iter().map(|host| {
-        let lookup_host = host.trim_end_matches('.').to_owned() + ".";
-
-        let resolver_fut = options.resolvers.ipv4_lookup(lookup_host.clone());
-        let trustable_resolver_fut = options.trustable_resolver.ipv4_lookup(lookup_host);
+        let lookup_host = format!("{}.", host.trim_end_matches('.'));
         let wildcard_ips = options.wildcard_ips.clone();
-
         let mut domain_data = DomainData::default();
 
-        let mut ip_lookup = Option::<Ipv4Lookup>::None;
-
         async move {
-            if let Ok(ip) = resolver_fut.await {
-                if options.disable_double_check {
-                    ip_lookup = Some(ip);
-                } else if let Ok(ip) = trustable_resolver_fut.await {
-                    ip_lookup = Some(ip);
+            let ip_lookup = if options.enable_double_check {
+                match (
+                    options.resolvers.ipv4_lookup(lookup_host.clone()).await,
+                    options.trustable_resolvers.ipv4_lookup(lookup_host).await,
+                ) {
+                    (Ok(_), Ok(ip)) => Some(ip),
+                    _ => None,
                 }
-            }
+            } else {
+                options.resolvers.ipv4_lookup(lookup_host).await.ok()
+            };
 
             if let Some(ip_lookup) = ip_lookup {
                 for ip in ip_lookup.iter() {
@@ -89,13 +85,7 @@ pub async fn return_hosts_data(options: &LibOptions) -> HashMap<String, DomainDa
                 .iter()
                 .all(|ip| wildcard_ips.contains(ip));
 
-            if !options.quiet_flag {
-                if options.show_ip_address && !domain_data.is_wildcard {
-                    println!("{};{:?}", host, domain_data.ipv4_addresses);
-                } else if !domain_data.is_wildcard {
-                    println!("{host}");
-                }
-            }
+            print_domain_data(&host, &domain_data, &options);
 
             (host, domain_data)
         }
@@ -106,10 +96,10 @@ pub async fn return_hosts_data(options: &LibOptions) -> HashMap<String, DomainDa
 }
 
 // Used internally for now
-pub async fn return_cname_data(
-    hosts: HashSet<String>,
-    resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
-    trustable_resolver: AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
+pub async fn return_cname_data<S: ::std::hash::BuildHasher>(
+    hosts: HashSet<String, S>,
+    resolver: TokioResolver,
+    trustable_resolver: TokioResolver,
     disable_double_check: bool,
     mut threads: usize,
 ) -> HashMap<String, DomainData> {
@@ -117,33 +107,34 @@ pub async fn return_cname_data(
         threads = hosts.len();
     }
 
-    let request_options = DnsRequestOptions::default();
-    let record_type = RecordType::CNAME;
-
     stream::iter(hosts)
         .map(|host| {
-            let lookup_host = host.trim_end_matches('.').to_owned() + ".";
-            let resolver_fut = resolver.lookup(lookup_host.clone(), record_type, request_options);
-            let trustable_resolver_fut =
-                trustable_resolver.lookup(lookup_host, record_type, request_options);
+            let host = host.trim_end_matches('.').to_owned();
+            let fqdn = format!("{host}.");
 
-            let mut domain_data = DomainData::default();
-
-            let mut cname_lookup = Option::<Lookup>::None;
+            let resolver = resolver.clone();
+            let trustable_resolver = trustable_resolver.clone();
 
             async move {
-                if let Ok(lookup) = resolver_fut.await {
-                    if disable_double_check {
-                        cname_lookup = Some(lookup);
-                    } else if let Ok(lookup) = trustable_resolver_fut.await {
-                        cname_lookup = Some(lookup);
+                let cname_lookup = if disable_double_check {
+                    resolver.lookup(fqdn.clone(), RecordType::CNAME).await.ok()
+                } else {
+                    match (
+                        resolver.lookup(fqdn.clone(), RecordType::CNAME).await,
+                        trustable_resolver.lookup(fqdn, RecordType::CNAME).await,
+                    ) {
+                        (Ok(_), Ok(lookup)) => Some(lookup),
+                        _ => None,
                     }
-                }
+                };
+
+                let mut domain_data = DomainData::default();
 
                 if let Some(lookup) = cname_lookup {
                     for record in lookup.iter() {
                         if let Some(cname) = record.as_cname() {
                             domain_data.cname = cname.to_string();
+                            break;
                         }
                     }
                 }

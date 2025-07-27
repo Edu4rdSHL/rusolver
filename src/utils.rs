@@ -1,18 +1,17 @@
 use {
+    crate::structs::{DomainData, LibOptions},
     futures::stream::{self, StreamExt},
-    rand::{distributions::Alphanumeric, thread_rng as rng, Rng},
-    std::{collections::HashSet, net::Ipv4Addr},
-    tokio::{self, fs::File, io::AsyncReadExt},
-    trust_dns_resolver::{
-        name_server::{GenericConnection, GenericConnectionProvider, TokioRuntime},
-        AsyncResolver,
+    hickory_resolver::{
+        config::{LookupIpStrategy, ResolverOpts, ServerOrderingStrategy},
+        TokioResolver,
     },
+    rand::{distr::Alphanumeric, rng, Rng},
+    std::{collections::HashSet, net::Ipv4Addr},
+    tokio::{fs::File, io::AsyncReadExt},
 };
 
-// In the future I may need to implement error propagation, but for now it's fine
-// to deal with matches
-pub async fn return_file_lines(file: String) -> HashSet<String> {
-    let mut f = match File::open(&file).await {
+pub async fn return_file_lines(file: &str) -> HashSet<String> {
+    let mut f = match File::open(file).await {
         Ok(file) => file,
         Err(e) => {
             eprintln!("Error opening resolvers file. Error: {e}");
@@ -21,58 +20,88 @@ pub async fn return_file_lines(file: String) -> HashSet<String> {
     };
     let mut buffer = String::new();
 
-    match f.read_to_string(&mut buffer).await {
-        Ok(a) => a,
-        _ => unreachable!("Error reading to string."),
-    };
-    buffer.lines().map(|f| format!("{f}:53")).collect()
+    (f.read_to_string(&mut buffer).await)
+        .unwrap_or_else(|_| unreachable!("Error reading to string."));
+
+    let estimated_lines = buffer.matches('\n').count() + 1;
+    let mut result = HashSet::with_capacity(estimated_lines);
+
+    for line in buffer.lines() {
+        if !line.is_empty() {
+            result.insert(format!("{line}:53"));
+        }
+    }
+    result
 }
 
 pub async fn detect_wildcards(
     target: &str,
-    resolvers: &AsyncResolver<GenericConnection, GenericConnectionProvider<TokioRuntime>>,
+    resolvers: &TokioResolver,
     quiet_flag: bool,
 ) -> HashSet<String> {
     if !quiet_flag {
         println!("Running wildcards detection for {target}...\n");
     }
-    let mut generated_wilcards: HashSet<String> = HashSet::new();
+
+    let mut generated_wildcards = HashSet::with_capacity(19);
+
+    // Generate random subdomains for wildcard detection
     for _ in 1..20 {
-        generated_wilcards.insert(format!(
-            "{}.{}.",
-            rng()
-                .sample_iter(Alphanumeric)
-                .take(15)
-                .map(char::from)
-                .collect::<String>(),
-            target
-        ));
+        let random_subdomain: String = rng()
+            .sample_iter(Alphanumeric)
+            .take(15)
+            .map(char::from)
+            .collect();
+        generated_wildcards.insert(format!("{random_subdomain}.{target}."));
     }
 
-    generated_wilcards = stream::iter(generated_wilcards.clone().into_iter().map(
-        |host| async move {
-            if let Ok(ips) = resolvers.ipv4_lookup(host.clone()).await {
-                ips.into_iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<String>>()
-            } else {
-                Vec::new()
-            }
-        },
-    ))
-    .buffer_unordered(10)
-    .map(stream::iter)
-    .flatten()
-    .collect()
-    .await;
+    let wildcard_ips: HashSet<String> = stream::iter(generated_wildcards.into_iter())
+        .map(|host| async move {
+            resolvers.ipv4_lookup(host).await.map_or_else(
+                |_| Vec::new(),
+                |ips| {
+                    ips.into_iter()
+                        .filter_map(|ip| {
+                            let ip_str = ip.to_string();
+                            if ip_str.parse::<Ipv4Addr>().is_ok() {
+                                Some(ip_str)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<String>>()
+                },
+            )
+        })
+        .buffer_unordered(10)
+        .map(stream::iter)
+        .flatten()
+        .collect()
+        .await;
 
-    generated_wilcards.retain(|ip| ip.parse::<Ipv4Addr>().is_ok());
-
-    if !generated_wilcards.is_empty() && !quiet_flag {
-        println!("Wilcards detected for {target} and wildcard's IP saved for furter work.");
-        println!("Wilcard IPs: {generated_wilcards:?}\n");
+    if !wildcard_ips.is_empty() && !quiet_flag {
+        println!("Wildcards detected for {target} and wildcard's IP saved for further work.");
+        println!("Wildcard IPs: {wildcard_ips:?}\n");
     } else if !quiet_flag {
-        println!("No wilcards detected for {target}, nice!\n");
+        println!("No wildcards detected for {target}, nice!\n");
     }
-    generated_wilcards
+    wildcard_ips
+}
+
+pub fn print_domain_data(host: &str, domain_data: &DomainData, options: &LibOptions) {
+    if options.show_ip_address {
+        println!("{}: {:?}", host, domain_data.ipv4_addresses);
+    } else {
+        println!("{}", host);
+    }
+}
+
+pub fn return_resolver_opts(timeout: u64, retries: usize) -> ResolverOpts {
+    let mut options = ResolverOpts::default();
+    options.timeout = std::time::Duration::from_secs(timeout);
+    options.attempts = retries;
+    options.ip_strategy = LookupIpStrategy::Ipv4Only;
+    options.num_concurrent_reqs = 1;
+    options.server_ordering_strategy = ServerOrderingStrategy::RoundRobin;
+    options
 }
