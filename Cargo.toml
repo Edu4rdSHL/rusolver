@@ -1,6 +1,6 @@
 [package]
 name = "rusolver"
-version = "0.10.1"
+version = "0.10.2"
 authors = ["Eduard Tolosa <edu4rdshl@protonmail.com>"]
 edition = "2021"
 description = "Fast DNS resolver written in Rust."
