@@ -7,12 +7,12 @@ LINUX_X86_TARGET="i686-unknown-linux-musl"
 WIN_TARGET="x86_64-pc-windows-gnu"
 ARMV7_TARGET="armv7-unknown-linux-gnueabihf"
 AARCH_TARGET="aarch64-unknown-linux-gnu"
-OSX_TARGET="x86_64-apple-darwin"
+# OSX_TARGET="x86_64-apple-darwin"
 MANPAGE_DIR="./$NAME.1"
 
 # Linux build
 echo "Building Linux artifact."
-if cargo build -q --release --target="$LINUX_TARGET"; then
+if cross build -q --release --target="$LINUX_TARGET"; then
   echo "Linux artifact build: SUCCESS"
   cp "target/$LINUX_TARGET/release/$NAME" "target/$LINUX_TARGET/release/$NAME-linux"
   strip "target/$LINUX_TARGET/release/$NAME-linux"
@@ -66,15 +66,15 @@ else
 fi
 
 # Mac OS build
-echo "Building OSX artifact."
-if CC=o64-clang CXX=o64-clang++ LIBZ_SYS_STATIC=1 cargo build -q --release --target="$OSX_TARGET"; then
-  echo "OSX artifact build: SUCCESS"
-  cp "target/$OSX_TARGET/release/$NAME" "target/$OSX_TARGET/release/$NAME-osx"
-  strip "target/$OSX_TARGET/release/$NAME-osx"
-  sha512sum "target/$OSX_TARGET/release/$NAME-osx" >"target/$OSX_TARGET/release/$NAME-osx.sha512"
-else
-  echo "OSX artifact build: FAILED"
-fi
+# echo "Building OSX artifact."
+# if CC=o64-clang CXX=o64-clang++ LIBZ_SYS_STATIC=1 cargo build -q --release --target="$OSX_TARGET"; then
+#   echo "OSX artifact build: SUCCESS"
+#   cp "target/$OSX_TARGET/release/$NAME" "target/$OSX_TARGET/release/$NAME-osx"
+#   strip "target/$OSX_TARGET/release/$NAME-osx"
+#   sha512sum "target/$OSX_TARGET/release/$NAME-osx" >"target/$OSX_TARGET/release/$NAME-osx.sha512"
+# else
+#   echo "OSX artifact build: FAILED"
+# fi
 
 echo "Creating manpage..."
 if command -v help2man >/dev/null; then
@@ -85,11 +85,4 @@ if command -v help2man >/dev/null; then
   fi
 else
   echo "Please install the help2man package."
-fi
-
-# Stop docker
-echo "Stopping docker."
-if ! sudo systemctl stop docker; then
-  echo "Failed to stop docker."
-  exit 1
 fi
